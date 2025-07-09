@@ -174,7 +174,7 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
   }
 });
 
-// Update the create-event endpoint for consistent timezone handling
+// Simpler fix - let Google Calendar handle the timezone conversion
 
 app.post('/create-event', requireCalendar, async (req, res) => {
   try {
@@ -197,35 +197,23 @@ app.post('/create-event', requireCalendar, async (req, res) => {
     const timeZone = process.env.TIMEZONE || 'America/Chicago';
     console.log(`📝 Creating event: ${title} on ${date} at ${startTime} ${timeZone}`);
 
-    // Create dates - these will be in local server time
-    const startDateTime = new Date(`${date}T${startTime}:00`);
-    const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
+    // Calculate end time
+    const [hour, minute] = startTime.split(':').map(Number);
+    const endHour = Math.floor((hour * 60 + minute + duration) / 60);
+    const endMinute = (hour * 60 + minute + duration) % 60;
+    const endTime = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
 
-    // Check for conflicts first
-    const conflicts = await calendar.events.list({
-      calendarId: CALENDAR_ID,
-      timeMin: startDateTime.toISOString(),
-      timeMax: endDateTime.toISOString(),
-      singleEvents: true,
-      timeZone: timeZone  // Ensure we check in the right timezone
-    });
-
-    if (conflicts.data.items && conflicts.data.items.length > 0) {
-      return res.json({
-        result: `There's already an appointment scheduled at that time. Would you like me to find another available time slot?`
-      });
-    }
-
+    // Create event with date/time strings and let Google Calendar handle timezone
     const event = {
       summary: title,
       description: description || `Appointment created via Retell voice agent`,
       start: {
-        dateTime: startDateTime.toISOString(),
-        timeZone: timeZone  // Explicitly set the timezone
+        dateTime: `${date}T${startTime}:00`,  // Without timezone suffix
+        timeZone: timeZone  // Google will interpret the dateTime in this timezone
       },
       end: {
-        dateTime: endDateTime.toISOString(),
-        timeZone: timeZone  // Explicitly set the timezone
+        dateTime: `${date}T${endTime}:00`,  // Without timezone suffix
+        timeZone: timeZone  // Google will interpret the dateTime in this timezone
       },
       reminders: {
         useDefault: false,
@@ -236,9 +224,25 @@ app.post('/create-event', requireCalendar, async (req, res) => {
       }
     };
 
-    // Add attendee if provided
     if (attendeeEmail) {
       event.attendees = [{ email: attendeeEmail }];
+    }
+
+    // Check for conflicts
+    const startCheckTime = new Date(`${date}T${startTime}:00`);
+    const endCheckTime = new Date(`${date}T${endTime}:00`);
+    
+    const conflicts = await calendar.events.list({
+      calendarId: CALENDAR_ID,
+      timeMin: startCheckTime.toISOString(),
+      timeMax: endCheckTime.toISOString(),
+      singleEvents: true
+    });
+
+    if (conflicts.data.items && conflicts.data.items.length > 0) {
+      return res.json({
+        result: `There's already an appointment scheduled at that time. Would you like me to find another available time slot?`
+      });
     }
 
     const response = await calendar.events.insert({
@@ -247,30 +251,38 @@ app.post('/create-event', requireCalendar, async (req, res) => {
       sendUpdates: attendeeEmail ? 'all' : 'none'
     });
 
-    // Format the confirmation time in the user's timezone
-    const formattedTime = startDateTime.toLocaleString('en-US', { 
+    // Format the response time properly
+    const createdEvent = response.data;
+    const eventStartTime = new Date(createdEvent.start.dateTime);
+    
+    const formattedTime = eventStartTime.toLocaleString('en-US', { 
       hour: 'numeric', 
       minute: '2-digit',
       timeZone: timeZone,
       hour12: true
     });
 
-    // Also format the date nicely
-    const formattedDate = startDateTime.toLocaleString('en-US', {
+    const formattedDate = eventStartTime.toLocaleString('en-US', {
       weekday: 'long',
       year: 'numeric',
-      month: 'long',
+      month: 'long', 
       day: 'numeric',
       timeZone: timeZone
     });
 
+    // For CDT/CST display
+    const isDST = eventStartTime.toLocaleString('en-US', { 
+      timeZone: timeZone, 
+      timeZoneName: 'short' 
+    }).includes('CDT');
+
     res.json({
-      result: `Perfect! I've scheduled "${title}" on ${formattedDate} at ${formattedTime} ${timeZone === 'America/Chicago' ? 'CDT' : ''} for ${duration} minutes. ${attendeeEmail ? `An invitation has been sent to ${attendeeEmail}.` : ''} You'll receive a reminder 30 minutes before.`,
+      result: `Perfect! I've scheduled "${title}" on ${formattedDate} at ${formattedTime} ${isDST ? 'CDT' : 'CST'} for ${duration} minutes. ${attendeeEmail ? `An invitation has been sent to ${attendeeEmail}.` : ''} You'll receive a reminder 30 minutes before.`,
       eventId: response.data.id,
       eventDetails: {
         title: title,
         date: date,
-        time: formattedTime,
+        time: startTime,  // Keep the original input time
         duration: duration,
         timezone: timeZone
       }
