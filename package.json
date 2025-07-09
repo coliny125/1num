@@ -1,16 +1,20 @@
 {
   "name": "retell-gcal-agent",
-  "version": "1.0.0",
-  "description": "Google Calendar integration for Retell AI",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "Google Calendar integration for Retell AI voice agent",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "googleapis": "^128.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
-  }
+    "node": ">=16.0.0"
+  },
+  "keywords": ["retell", "google-calendar", "voice-ai"],
+  "author": "",
+  "license": "MIT"
 }
