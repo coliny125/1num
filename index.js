@@ -174,7 +174,8 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
   }
 });
 
-// Create event endpoint
+// Update the create-event endpoint for consistent timezone handling
+
 app.post('/create-event', requireCalendar, async (req, res) => {
   try {
     const { args = {} } = req.body;
@@ -193,8 +194,10 @@ app.post('/create-event', requireCalendar, async (req, res) => {
       });
     }
 
-    console.log(`📝 Creating event: ${title} on ${date} at ${startTime}`);
+    const timeZone = process.env.TIMEZONE || 'America/Chicago';
+    console.log(`📝 Creating event: ${title} on ${date} at ${startTime} ${timeZone}`);
 
+    // Create dates - these will be in local server time
     const startDateTime = new Date(`${date}T${startTime}:00`);
     const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
 
@@ -203,7 +206,8 @@ app.post('/create-event', requireCalendar, async (req, res) => {
       calendarId: CALENDAR_ID,
       timeMin: startDateTime.toISOString(),
       timeMax: endDateTime.toISOString(),
-      singleEvents: true
+      singleEvents: true,
+      timeZone: timeZone  // Ensure we check in the right timezone
     });
 
     if (conflicts.data.items && conflicts.data.items.length > 0) {
@@ -217,11 +221,11 @@ app.post('/create-event', requireCalendar, async (req, res) => {
       description: description || `Appointment created via Retell voice agent`,
       start: {
         dateTime: startDateTime.toISOString(),
-        timeZone: process.env.TIMEZONE || 'America/Chicago'
+        timeZone: timeZone  // Explicitly set the timezone
       },
       end: {
         dateTime: endDateTime.toISOString(),
-        timeZone: process.env.TIMEZONE || 'America/Chicago'
+        timeZone: timeZone  // Explicitly set the timezone
       },
       reminders: {
         useDefault: false,
@@ -243,15 +247,33 @@ app.post('/create-event', requireCalendar, async (req, res) => {
       sendUpdates: attendeeEmail ? 'all' : 'none'
     });
 
-    const formattedTime = startDateTime.toLocaleTimeString('en-US', { 
+    // Format the confirmation time in the user's timezone
+    const formattedTime = startDateTime.toLocaleString('en-US', { 
       hour: 'numeric', 
-      minute: '2-digit' 
+      minute: '2-digit',
+      timeZone: timeZone,
+      hour12: true
+    });
+
+    // Also format the date nicely
+    const formattedDate = startDateTime.toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      timeZone: timeZone
     });
 
     res.json({
-      result: `Perfect! I've scheduled "${title}" on ${date} at ${formattedTime} for ${duration} minutes. ${attendeeEmail ? `An invitation has been sent to ${attendeeEmail}.` : ''} You'll receive a reminder 30 minutes before.`,
+      result: `Perfect! I've scheduled "${title}" on ${formattedDate} at ${formattedTime} ${timeZone === 'America/Chicago' ? 'CDT' : ''} for ${duration} minutes. ${attendeeEmail ? `An invitation has been sent to ${attendeeEmail}.` : ''} You'll receive a reminder 30 minutes before.`,
       eventId: response.data.id,
-      eventLink: response.data.htmlLink
+      eventDetails: {
+        title: title,
+        date: date,
+        time: formattedTime,
+        duration: duration,
+        timezone: timeZone
+      }
     });
   } catch (error) {
     console.error('❌ Create event error:', error);
@@ -261,7 +283,8 @@ app.post('/create-event', requireCalendar, async (req, res) => {
   }
 });
 
-// Update event endpoint
+// Update the update-event endpoint for timezone consistency
+
 app.post('/update-event', requireCalendar, async (req, res) => {
   try {
     const { args = {} } = req.body;
@@ -273,6 +296,7 @@ app.post('/update-event', requireCalendar, async (req, res) => {
       });
     }
 
+    const timeZone = process.env.TIMEZONE || 'America/Chicago';
     console.log(`📝 Updating event: ${eventId}`);
 
     // Get existing event
@@ -283,15 +307,22 @@ app.post('/update-event', requireCalendar, async (req, res) => {
 
     // Update fields
     if (newDate || newTime) {
-      const date = newDate || existingEvent.start.dateTime.split('T')[0];
-      const time = newTime || existingEvent.start.dateTime.split('T')[1].substring(0, 5);
+      const date = newDate || existingEvent.data.start.dateTime.split('T')[0];
+      const time = newTime || existingEvent.data.start.dateTime.split('T')[1].substring(0, 5);
       const duration = newDuration || 
-        (new Date(existingEvent.end.dateTime) - new Date(existingEvent.start.dateTime)) / 60000;
+        (new Date(existingEvent.data.end.dateTime) - new Date(existingEvent.data.start.dateTime)) / 60000;
 
-      existingEvent.start.dateTime = new Date(`${date}T${time}:00`).toISOString();
-      existingEvent.end.dateTime = new Date(
-        new Date(`${date}T${time}:00`).getTime() + duration * 60000
-      ).toISOString();
+      const newStartDateTime = new Date(`${date}T${time}:00`);
+      const newEndDateTime = new Date(newStartDateTime.getTime() + duration * 60000);
+
+      existingEvent.data.start = {
+        dateTime: newStartDateTime.toISOString(),
+        timeZone: timeZone
+      };
+      existingEvent.data.end = {
+        dateTime: newEndDateTime.toISOString(),
+        timeZone: timeZone
+      };
     }
 
     const response = await calendar.events.update({
@@ -300,8 +331,24 @@ app.post('/update-event', requireCalendar, async (req, res) => {
       resource: existingEvent.data
     });
 
+    // Format the response with proper timezone
+    const updatedStart = new Date(response.data.start.dateTime);
+    const formattedTime = updatedStart.toLocaleString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: timeZone,
+      hour12: true
+    });
+    const formattedDate = updatedStart.toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      timeZone: timeZone
+    });
+
     res.json({
-      result: `I've successfully updated your appointment. ${newDate ? `New date: ${newDate}.` : ''} ${newTime ? `New time: ${newTime}.` : ''}`,
+      result: `I've successfully updated your appointment to ${formattedDate} at ${formattedTime} ${timeZone === 'America/Chicago' ? 'CDT' : ''}.`,
       eventId: response.data.id
     });
   } catch (error) {
