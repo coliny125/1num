@@ -1,71 +1,115 @@
-// server.js - Complete Google Calendar + Retell Integration
+// server.js - Updated with better error handling and debugging
 const express = require('express');
 const { google } = require('googleapis');
 
 const app = express();
 app.use(express.json());
 
-// Initialize Google Calendar with Service Account
-const auth = new google.auth.GoogleAuth({
-  credentials: process.env.GOOGLE_SERVICE_ACCOUNT_KEY ? 
-    JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY) : undefined,
-  scopes: ['https://www.googleapis.com/auth/calendar']
-});
+// Add startup logging
+console.log('🚀 Starting server...');
+console.log('📋 Environment check:');
+console.log('- NODE_ENV:', process.env.NODE_ENV || 'not set');
+console.log('- PORT:', process.env.PORT || '3000');
+console.log('- RETELL_API_KEY exists:', !!process.env.RETELL_API_KEY);
+console.log('- GOOGLE_SERVICE_ACCOUNT_KEY exists:', !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
 
-// Simple Retell signature verification (add full verification later)
-const verifyRetell = (req, res, next) => {
-  // For now, just check if API key exists
-  if (!process.env.RETELL_API_KEY) {
-    return res.status(500).json({ error: 'Retell API key not configured' });
-  }
-  next();
-};
+// Initialize Google Auth with better error handling
+let auth;
+let authError = null;
 
-// Health check endpoint
-app.get('/health', async (req, res) => {
-  try {
-    const authClient = await auth.getClient();
-    const calendar = google.calendar({ version: 'v3', auth: authClient });
-    await calendar.calendarList.list({ maxResults: 1 });
-    
-    res.json({ 
-      status: 'healthy',
-      message: 'Server is running and Google Calendar is connected'
-    });
-  } catch (error) {
-    res.status(503).json({ 
-      status: 'unhealthy',
-      error: error.message 
-    });
+try {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY environment variable is missing');
   }
+
+  console.log('📝 Parsing service account JSON...');
+  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+  console.log('✅ Service account email:', credentials.client_email);
+  
+  auth = new google.auth.GoogleAuth({
+    credentials: credentials,
+    scopes: ['https://www.googleapis.com/auth/calendar']
+  });
+  
+  console.log('✅ Google Auth initialized successfully');
+} catch (error) {
+  authError = error;
+  console.error('❌ Failed to initialize Google Auth:', error.message);
+  console.error('Error details:', error);
+}
+
+// Basic error handler middleware
+app.use((err, req, res, next) => {
+  console.error('Express error:', err);
+  res.status(500).json({ error: 'Internal server error', message: err.message });
 });
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
     service: 'Retell Google Calendar Agent',
-    status: 'running',
-    endpoints: [
-      'GET /health',
-      'POST /check-availability',
-      'POST /create-event'
-    ]
+    status: authError ? 'error' : 'running',
+    authStatus: authError ? authError.message : 'connected',
+    endpoints: ['/health', '/check-availability', '/create-event']
   });
 });
 
-// Check calendar availability
-app.post('/check-availability', verifyRetell, async (req, res) => {
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  console.log('Health check requested');
+  
+  if (authError) {
+    return res.status(503).json({ 
+      status: 'unhealthy',
+      error: 'Auth initialization failed',
+      details: authError.message
+    });
+  }
+
+  try {
+    const authClient = await auth.getClient();
+    const calendar = google.calendar({ version: 'v3', auth: authClient });
+    
+    // Test the connection
+    const calendarList = await calendar.calendarList.list({ maxResults: 1 });
+    
+    res.json({ 
+      status: 'healthy',
+      message: 'Server is running and Google Calendar is connected',
+      calendarsFound: calendarList.data.items ? calendarList.data.items.length : 0
+    });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(503).json({ 
+      status: 'unhealthy',
+      error: error.message,
+      code: error.code,
+      details: error.errors ? error.errors[0] : 'Unknown error'
+    });
+  }
+});
+
+// Check availability endpoint
+app.post('/check-availability', async (req, res) => {
+  console.log('Check availability requested:', req.body);
+  
+  if (authError) {
+    return res.status(503).json({ 
+      result: "Service is not properly configured. Please check server logs."
+    });
+  }
+
   try {
     const { args } = req.body;
     const { date, startTime, endTime } = args;
-
-    console.log('Checking availability:', { date, startTime, endTime });
 
     const authClient = await auth.getClient();
     const calendar = google.calendar({ version: 'v3', auth: authClient });
 
     const timeMin = new Date(`${date}T${startTime}:00`).toISOString();
     const timeMax = new Date(`${date}T${endTime}:00`).toISOString();
+
+    console.log('Checking calendar from', timeMin, 'to', timeMax);
 
     const response = await calendar.events.list({
       calendarId: 'primary',
@@ -82,26 +126,31 @@ app.post('/check-availability', verifyRetell, async (req, res) => {
         result: `The calendar is free on ${date} between ${startTime} and ${endTime}.`
       });
     } else {
-      const busyCount = events.length;
       res.json({
-        result: `There are ${busyCount} appointments on ${date} between ${startTime} and ${endTime}.`
+        result: `There are ${events.length} appointments on ${date} between ${startTime} and ${endTime}.`
       });
     }
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Check availability error:', error);
     res.json({
       result: "I'm having trouble checking the calendar. Please try again."
     });
   }
 });
 
-// Create calendar event
-app.post('/create-event', verifyRetell, async (req, res) => {
+// Create event endpoint
+app.post('/create-event', async (req, res) => {
+  console.log('Create event requested:', req.body);
+  
+  if (authError) {
+    return res.status(503).json({ 
+      result: "Service is not properly configured. Please check server logs."
+    });
+  }
+
   try {
     const { args } = req.body;
     const { title, date, startTime, duration = 60 } = args;
-
-    console.log('Creating event:', { title, date, startTime, duration });
 
     const authClient = await auth.getClient();
     const calendar = google.calendar({ version: 'v3', auth: authClient });
@@ -121,6 +170,8 @@ app.post('/create-event', verifyRetell, async (req, res) => {
       }
     };
 
+    console.log('Creating event:', event);
+
     const response = await calendar.events.insert({
       calendarId: 'primary',
       resource: event
@@ -131,15 +182,25 @@ app.post('/create-event', verifyRetell, async (req, res) => {
       eventId: response.data.id
     });
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Create event error:', error);
     res.json({
       result: "I couldn't create the appointment. Please check the details and try again."
     });
   }
 });
 
+// Catch all 404
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found', path: req.path });
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server listening on port ${PORT}`);
+  console.log(`🌐 Ready to handle requests`);
+  
+  if (authError) {
+    console.error('⚠️  WARNING: Server started but Google Auth failed to initialize');
+  }
 });
