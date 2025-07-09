@@ -107,7 +107,9 @@ function requireCalendar(req, res, next) {
   next();
 }
 
-// Check availability endpoint
+// Update the check-availability endpoint in your index.js
+// Replace the check-availability endpoint with this version:
+
 app.post('/check-availability', requireCalendar, async (req, res) => {
   try {
     const { args = {} } = req.body;
@@ -121,6 +123,8 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
 
     console.log(`📅 Checking availability for ${date} from ${startTime} to ${endTime}`);
 
+    // Create date times in the user's timezone
+    const timeZone = process.env.TIMEZONE || 'America/Chicago';
     const timeMin = new Date(`${date}T${startTime}:00`).toISOString();
     const timeMax = new Date(`${date}T${endTime}:00`).toISOString();
 
@@ -129,7 +133,8 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
       timeMin: timeMin,
       timeMax: timeMax,
       singleEvents: true,
-      orderBy: 'startTime'
+      orderBy: 'startTime',
+      timeZone: timeZone  // Add timezone to the query
     });
 
     const events = response.data.items || [];
@@ -139,13 +144,22 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
         result: `Great news! Your calendar is completely free on ${date} between ${startTime} and ${endTime}.`
       });
     } else {
+      // Format event times in the correct timezone
       const eventSummaries = events.map(event => {
-        const start = new Date(event.start.dateTime || event.start.date);
-        const time = start.toLocaleTimeString('en-US', { 
-          hour: 'numeric', 
-          minute: '2-digit' 
-        });
-        return `${time}: ${event.summary || 'Busy'}`;
+        // Get the event start time
+        const eventStart = event.start.dateTime || event.start.date;
+        
+        // Convert to user's timezone for display
+        const startDate = new Date(eventStart);
+        const timeOptions = {
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZone: timeZone,  // Use the configured timezone
+          hour12: true
+        };
+        
+        const formattedTime = startDate.toLocaleString('en-US', timeOptions);
+        return `${formattedTime}: ${event.summary || 'Busy'}`;
       }).join(', ');
 
       res.json({
