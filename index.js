@@ -176,6 +176,7 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
 
 // Simpler fix - let Google Calendar handle the timezone conversion
 
+// Complete create-event endpoint with proper timezone handling
 app.post('/create-event', requireCalendar, async (req, res) => {
   try {
     const { args = {} } = req.body;
@@ -270,21 +271,22 @@ app.post('/create-event', requireCalendar, async (req, res) => {
       timeZone: timeZone
     });
 
-    // For CDT/CST display
-    const isDST = eventStartTime.toLocaleString('en-US', { 
+    // Get the actual timezone abbreviation (EST, PST, CDT, etc.)
+    const timeZoneAbbr = eventStartTime.toLocaleString('en-US', { 
       timeZone: timeZone, 
       timeZoneName: 'short' 
-    }).includes('CDT');
+    }).split(' ').pop(); // Gets the last part which is the timezone
 
     res.json({
-      result: `Perfect! I've scheduled "${title}" on ${formattedDate} at ${formattedTime} ${isDST ? 'CDT' : 'CST'} for ${duration} minutes. ${attendeeEmail ? `An invitation has been sent to ${attendeeEmail}.` : ''} You'll receive a reminder 30 minutes before.`,
+      result: `Perfect! I've scheduled "${title}" on ${formattedDate} at ${formattedTime} ${timeZoneAbbr} for ${duration} minutes. ${attendeeEmail ? `An invitation has been sent to ${attendeeEmail}.` : ''} You'll receive a reminder 30 minutes before.`,
       eventId: response.data.id,
       eventDetails: {
         title: title,
         date: date,
-        time: startTime,  // Keep the original input time
+        time: startTime,
         duration: duration,
-        timezone: timeZone
+        timezone: timeZone,
+        timezoneAbbr: timeZoneAbbr
       }
     });
   } catch (error) {
