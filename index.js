@@ -13,6 +13,9 @@ console.log('Environment:', {
   hasRetellKey: !!process.env.RETELL_API_KEY
 });
 
+//Personal Google Cal Email
+const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'colinyuan3333@gmail.com'; // Replace with your actual Gmail
+
 // Global calendar instance
 let calendar = null;
 let authError = null;
@@ -122,7 +125,7 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
     const timeMax = new Date(`${date}T${endTime}:00`).toISOString();
 
     const response = await calendar.events.list({
-      calendarId: 'primary',
+      calendarId: CALENDAR_ID,
       timeMin: timeMin,
       timeMax: timeMax,
       singleEvents: true,
@@ -183,7 +186,7 @@ app.post('/create-event', requireCalendar, async (req, res) => {
 
     // Check for conflicts first
     const conflicts = await calendar.events.list({
-      calendarId: 'primary',
+      calendarId: CALENDAR_ID,
       timeMin: startDateTime.toISOString(),
       timeMax: endDateTime.toISOString(),
       singleEvents: true
@@ -221,7 +224,7 @@ app.post('/create-event', requireCalendar, async (req, res) => {
     }
 
     const response = await calendar.events.insert({
-      calendarId: 'primary',
+      calendarId: CALENDAR_ID,
       resource: event,
       sendUpdates: attendeeEmail ? 'all' : 'none'
     });
@@ -260,7 +263,7 @@ app.post('/update-event', requireCalendar, async (req, res) => {
 
     // Get existing event
     const existingEvent = await calendar.events.get({
-      calendarId: 'primary',
+      calendarId: CALENDAR_ID,
       eventId: eventId
     });
 
@@ -278,7 +281,7 @@ app.post('/update-event', requireCalendar, async (req, res) => {
     }
 
     const response = await calendar.events.update({
-      calendarId: 'primary',
+      calendarId: CALENDAR_ID,
       eventId: eventId,
       resource: existingEvent.data
     });
@@ -310,7 +313,7 @@ app.post('/cancel-event', requireCalendar, async (req, res) => {
     console.log(`🗑️ Cancelling event: ${eventId}`);
 
     await calendar.events.delete({
-      calendarId: 'primary',
+      calendarId: CALENDAR_ID,
       eventId: eventId
     });
 
