@@ -121,7 +121,11 @@ function requireCalendar(req, res, next) {
   next();
 }
 
-// Updated check-availability endpoint that returns event IDs
+// REPLACE your entire check-availability endpoint with this
+// Find where it starts with: app.post('/check-availability'
+// Delete everything until the next app.post
+// Then paste this complete function:
+
 app.post('/check-availability', requireCalendar, async (req, res) => {
   try {
     const { args = {} } = req.body;
@@ -129,7 +133,8 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
 
     if (!date || !startTime || !endTime) {
       return res.json({
-        result: 'I need a date, start time, and end time to check availability. Could you please provide those details?'
+        result: 'I need a date, start time, and end time to check availability. Could you please provide those details?',
+        events: []
       });
     }
 
@@ -192,43 +197,6 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
     res.json({
       result: 'I encountered an issue checking the calendar. Please try again.',
       events: []
-    });
-  }
-});
-
-    const events = response.data.items || [];
-    
-    if (events.length === 0) {
-      res.json({
-        result: `Great news! Your calendar is completely free on ${date} between ${startTime} and ${endTime}.`
-      });
-    } else {
-      // Format event times in the correct timezone
-      const eventSummaries = events.map(event => {
-        // Get the event start time
-        const eventStart = event.start.dateTime || event.start.date;
-        
-        // Convert to user's timezone for display
-        const startDate = new Date(eventStart);
-        const timeOptions = {
-          hour: 'numeric',
-          minute: '2-digit',
-          timeZone: timeZone,  // Use the configured timezone
-          hour12: true
-        };
-        
-        const formattedTime = startDate.toLocaleString('en-US', timeOptions);
-        return `${formattedTime}: ${event.summary || 'Busy'}`;
-      }).join(', ');
-
-      res.json({
-        result: `On ${date}, you have ${events.length} appointment${events.length > 1 ? 's' : ''}: ${eventSummaries}. Would you like to schedule around these times?`
-      });
-    }
-  } catch (error) {
-    console.error('❌ Check availability error:', error);
-    res.json({
-      result: 'I encountered an issue checking the calendar. Please try again.'
     });
   }
 });
