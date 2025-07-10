@@ -324,8 +324,7 @@ app.post('/create-event', requireCalendar, async (req, res) => {
   }
 });
 
-// Update the update-event endpoint for timezone consistency
-
+// Replace your entire update-event endpoint with this version
 app.post('/update-event', requireCalendar, async (req, res) => {
   try {
     const { args = {} } = req.body;
@@ -346,30 +345,46 @@ app.post('/update-event', requireCalendar, async (req, res) => {
       eventId: eventId
     });
 
-    // Update fields
+    // Prepare the updated event data
+    const updatedEvent = { ...existingEvent.data };
+
+    // Update fields if provided
     if (newDate || newTime) {
-      const date = newDate || existingEvent.data.start.dateTime.split('T')[0];
-      const time = newTime || existingEvent.data.start.dateTime.split('T')[1].substring(0, 5);
-      const duration = newDuration || 
-        (new Date(existingEvent.data.end.dateTime) - new Date(existingEvent.data.start.dateTime)) / 60000;
+      // Extract current date and time from existing event
+      const existingStart = new Date(existingEvent.data.start.dateTime);
+      const existingDate = existingStart.toISOString().split('T')[0];
+      const existingTime = existingStart.toTimeString().substring(0, 5);
+      
+      // Use new values or keep existing ones
+      const date = newDate || existingDate;
+      const time = newTime || existingTime;
+      
+      // Calculate duration
+      const existingDuration = (new Date(existingEvent.data.end.dateTime) - new Date(existingEvent.data.start.dateTime)) / 60000;
+      const duration = newDuration || existingDuration;
 
-      const newStartDateTime = new Date(`${date}T${time}:00`);
-      const newEndDateTime = new Date(newStartDateTime.getTime() + duration * 60000);
+      // Calculate end time
+      const [hour, minute] = time.split(':').map(Number);
+      const endHour = Math.floor((hour * 60 + minute + duration) / 60);
+      const endMinute = (hour * 60 + minute + duration) % 60;
+      const endTime = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
 
-      existingEvent.data.start = {
-        dateTime: newStartDateTime.toISOString(),
-        timeZone: timeZone
+      // Update with proper timezone handling (like create-event)
+      updatedEvent.start = {
+        dateTime: `${date}T${time}:00`,  // Without timezone suffix
+        timeZone: timeZone  // Google interprets this in the specified timezone
       };
-      existingEvent.data.end = {
-        dateTime: newEndDateTime.toISOString(),
-        timeZone: timeZone
+      updatedEvent.end = {
+        dateTime: `${date}T${endTime}:00`,  // Without timezone suffix
+        timeZone: timeZone  // Google interprets this in the specified timezone
       };
     }
 
+    // Update the event
     const response = await calendar.events.update({
       calendarId: CALENDAR_ID,
       eventId: eventId,
-      resource: existingEvent.data
+      resource: updatedEvent
     });
 
     // Format the response with proper timezone
@@ -388,15 +403,33 @@ app.post('/update-event', requireCalendar, async (req, res) => {
       timeZone: timeZone
     });
 
+    // Get timezone abbreviation
+    const timeZoneAbbr = updatedStart.toLocaleString('en-US', { 
+      timeZone: timeZone, 
+      timeZoneName: 'short' 
+    }).split(' ').pop();
+
     res.json({
-      result: `I've successfully updated your appointment to ${formattedDate} at ${formattedTime} ${timeZone === 'America/Chicago' ? 'CDT' : ''}.`,
-      eventId: response.data.id
+      result: `I've successfully updated your appointment "${response.data.summary}" to ${formattedDate} at ${formattedTime} ${timeZoneAbbr}.`,
+      eventId: response.data.id,
+      updatedDetails: {
+        title: response.data.summary,
+        date: date,
+        time: time,
+        timezone: timeZone
+      }
     });
   } catch (error) {
     console.error('❌ Update event error:', error);
-    res.json({
-      result: 'I couldn\'t update the appointment. Please make sure you have the correct event ID.'
-    });
+    if (error.code === 404) {
+      res.json({
+        result: 'I couldn\'t find that appointment. Please make sure you have the correct event reference.'
+      });
+    } else {
+      res.json({
+        result: 'I couldn\'t update the appointment. Please check the details and try again.'
+      });
+    }
   }
 });
 
