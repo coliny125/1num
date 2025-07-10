@@ -121,9 +121,7 @@ function requireCalendar(req, res, next) {
   next();
 }
 
-// Update the check-availability endpoint in your index.js
-// Replace the check-availability endpoint with this version:
-
+// Updated check-availability endpoint that returns event IDs
 app.post('/check-availability', requireCalendar, async (req, res) => {
   try {
     const { args = {} } = req.body;
@@ -137,7 +135,6 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
 
     console.log(`📅 Checking availability for ${date} from ${startTime} to ${endTime}`);
 
-    // Create date times in the user's timezone
     const timeZone = process.env.TIMEZONE || 'America/Chicago';
     const timeMin = new Date(`${date}T${startTime}:00`).toISOString();
     const timeMax = new Date(`${date}T${endTime}:00`).toISOString();
@@ -148,8 +145,56 @@ app.post('/check-availability', requireCalendar, async (req, res) => {
       timeMax: timeMax,
       singleEvents: true,
       orderBy: 'startTime',
-      timeZone: timeZone  // Add timezone to the query
+      timeZone: timeZone
     });
+
+    const events = response.data.items || [];
+    
+    if (events.length === 0) {
+      res.json({
+        result: `Great news! Your calendar is completely free on ${date} between ${startTime} and ${endTime}.`,
+        events: []
+      });
+    } else {
+      // Format events with IDs for reference
+      const eventDetails = events.map((event, index) => {
+        const eventStart = event.start.dateTime || event.start.date;
+        const startDate = new Date(eventStart);
+        
+        const formattedTime = startDate.toLocaleString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZone: timeZone,
+          hour12: true
+        });
+        
+        return {
+          id: event.id,
+          title: event.summary || 'Busy',
+          time: formattedTime,
+          position: index + 1
+        };
+      });
+
+      // Create human-readable summary with position numbers
+      const eventSummaries = eventDetails.map(evt => 
+        `${evt.position}. ${evt.time}: ${evt.title}`
+      ).join(', ');
+
+      res.json({
+        result: `On ${date}, you have ${events.length} appointment${events.length > 1 ? 's' : ''}: ${eventSummaries}. Would you like to schedule around these times or modify any of these appointments?`,
+        events: eventDetails,
+        tip: "To update or cancel an appointment, refer to it by its position number (1, 2, 3, etc.)"
+      });
+    }
+  } catch (error) {
+    console.error('❌ Check availability error:', error);
+    res.json({
+      result: 'I encountered an issue checking the calendar. Please try again.',
+      events: []
+    });
+  }
+});
 
     const events = response.data.items || [];
     
