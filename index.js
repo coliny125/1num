@@ -70,6 +70,20 @@ app.get('/', (req, res) => {
     authStatus: calendar ? 'connected' : (authError ? authError.message : 'connecting...')
   });
 });
+//get current date
+
+app.get('/current-date', (req, res) => {
+  const now = new Date();
+  const timeZone = process.env.TIMEZONE || 'America/Chicago';
+  
+  res.json({
+    date: now.toISOString().split('T')[0], // YYYY-MM-DD
+    time: now.toTimeString().split(' ')[0].substring(0, 5), // HH:MM
+    day: now.toLocaleDateString('en-US', { weekday: 'long', timeZone }),
+    full: now.toLocaleString('en-US', { timeZone }),
+    timezone: timeZone
+  });
+});
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
